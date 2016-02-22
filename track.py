@@ -401,7 +401,16 @@ def frame_skip(video, offset_seconds):
     pos = video.get(cv2.CAP_PROP_POS_MSEC)
     video.set(cv2.CAP_PROP_POS_MSEC, pos + offset_seconds * 1000)
     
-        
+
+def shadow_compose(a,b):
+    black = np.where(np.sum(b,axis=2)==0, 1, 0).astype(np.uint8)
+    kernel = np.ones((3,3)).astype(np.uint8)
+    shadow = cv2.erode(black, kernel, iterations=2)
+    
+    shadowed = cv2.multiply(a, np.dstack((shadow, shadow, shadow)).astype(np.uint8))
+    return cv2.add(shadowed, b)
+    
+    
 def track_video(fname, tags):
     cap = cv2.VideoCapture(fname)
 
@@ -420,7 +429,7 @@ def track_video(fname, tags):
         y = 20
         for k,v in tags.iteritems():
             cv2.putText(img, k, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
-            cv2.putText(img, v, (x+20,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,48,0))
+            cv2.putText(img, v, (x+20,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,108,0))
             y += 15
             
 
@@ -443,8 +452,8 @@ def track_video(fname, tags):
                 # create the mask for drawing the tracks
                 mask = np.zeros_like(frame)
                 rect_img = np.zeros_like(frame)
-                tag_img = np.zeros_like(frame)
-                print_tags(tag_img, tags)
+                controls_img = np.zeros_like(frame)
+                print_tags(controls_img, tags)
 
             updates = []    
             
@@ -476,23 +485,18 @@ def track_video(fname, tags):
         for r in rect_handler.rect_stack:            
             # draw each active rectangle
             r.draw(rect_img)
-            
-            
-
-        rect_handler.current_rect.draw(rect_img)
+        rect_handler.current_rect.draw(rect_img)    
         
+        # composite the rectangels        
         img = cv2.add(frame,mask.astype(np.uint8))    
         img = cv2.add(img,rect_img)
-        img = cv2.add(img,tag_img)
+        img = shadow_compose(img,controls_img)
         rect_img *= 0
         
+        # show the controls (just pause at the moment)
         if show_pause:
             draw_rect([20,20,40,100], img, (255,255,255), thick=-1)
             draw_rect([60,20,80,100], img, (255,255,255), thick=-1)
-        
-        
-        
-       
         
         # show the image and check for key activity
         cv2.imshow('image',img)
@@ -500,42 +504,40 @@ def track_video(fname, tags):
         
         k = cv2.waitKey(20) 
         
+        
+        # #clean up key handling #
+        
         if k in key_map:
             key = key_map[k]
-            if key=='left':
-                frame_skip(cap, -5)
-            if key=='right':
-                frame_skip(cap, 5)
-                
-            
+        else:
+            key = chr(k & 0xff)
+        
         if k & 0xff == 27:
             rect_handler.abort()
+            
         
-        key_chr = chr(k&0xff)
+        key_dispatch = {'left':lambda:frame_skip(cap, -5), 'right':lambda: frame_skip(cap, 5),
+                        '+':lambda:rect_handler.scale(1.08), '-':lambda: rect_handler.scale(1.05),
+                        '\r': rect_handler.set_tags 
+        }
         
-        if key_chr=='+':
-            rect_handler.scale(1.08)
-        
-        if key_chr=='-':
-            rect_handler.scale(0.92)
-        
-       
-        if key_chr==' ':
+        if key in key_dispatch:
+            key_dispatch[key]()
+               
+        if key==' ':
             pause = not pause
-        if key_chr=='r':
+        if key=='r':
             for t in trackers:
                 t.refresh()
             
-        if key_chr in tags:        
-            rect_handler.add_tag(tags[key_chr])
+        if key in tags:        
+            rect_handler.add_tag(tags[key])
             
-        if key_chr=='\r':        
-            rect_handler.set_tags()
         
     cv2.destroyAllWindows()
     cap.release()
 
 tags = {"p":"pedestrian", "w":"wall"}    
-track_video("videos/walking.avi", tags = {"p":"Pedestrian", "w":"Wall"})
+track_video("../videos/walking.avi", tags = {"p":"Pedestrian", "w":"Wall"})
 
 
